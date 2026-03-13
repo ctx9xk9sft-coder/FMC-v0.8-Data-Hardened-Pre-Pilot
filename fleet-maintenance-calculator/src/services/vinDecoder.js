@@ -1,30 +1,31 @@
 import vinDatabase from "../data/vin_database.json";
 
 function decodeVin(vin) {
-
   const db = vinDatabase;
 
   const result = {
     vin: vin || "",
     valid: true,
+    supported: true,
+    reason: null,
     validation_errors: [],
     wmi: {
       code: null,
       manufacturer: null,
-      country_hint: null
+      country_hint: null,
     },
     model: {
       raw_code: null,
       resolved_ruleset: null,
       name: null,
-      generation: null
+      generation: null,
     },
     body: {
       code: null,
       style: null,
       normalized_style: null,
       steering: null,
-      drivetrain: null
+      drivetrain: null,
     },
     engine: {
       code: null,
@@ -32,34 +33,53 @@ function decodeVin(vin) {
       fuel_type: null,
       displacement_l: null,
       power_kw: [],
-      power_kw_display: null
+      power_kw_display: null,
     },
     restraint_system: {
       code: null,
-      description: null
+      description: null,
     },
     model_year: {
       code: null,
-      year: null
+      year: null,
     },
     plant: {
       code: null,
-      name: null
+      name: null,
     },
     serial_number: null,
     special_flags: {
       n1: false,
       motorsport: false,
-      ambiguous_model: false
+      ambiguous_model: false,
     },
     confidence: "high",
     warnings: [],
-    possible_matches: []
+    possible_matches: [],
+
+    // kompatibilnost sa postojećim App.jsx
+    marka: "Skoda",
+    modelName: null,
+    model: null,
+    motorKod: null,
+    motor: null,
+    menjac: null,
+    modelYear: null,
+    drivetrain: null,
+    gearboxCode: "N/A",
+    fuelType: null,
+    oilCapacity: "N/A",
+    oilSpec: "N/A",
+    oilSae: "N/A",
+    hourlyRate: 5500,
+    candidates: [],
   };
 
   if (typeof vin !== "string") {
     result.valid = false;
+    result.supported = false;
     result.validation_errors.push("VIN must be a string.");
+    result.reason = "VIN mora biti tekst.";
     result.confidence = "low";
     return result;
   }
@@ -69,16 +89,20 @@ function decodeVin(vin) {
 
   if (cleanVin.length !== 17) {
     result.valid = false;
+    result.supported = false;
     result.validation_errors.push("VIN must be exactly 17 characters long.");
   }
 
   if (/[^A-HJ-NPR-Z0-9]/.test(cleanVin)) {
     result.valid = false;
+    result.supported = false;
     result.validation_errors.push("VIN contains invalid characters.");
   }
 
   if (!result.valid) {
     result.confidence = "low";
+    result.reason =
+      result.validation_errors.join(", ") || "VIN nije podržan";
     return result;
   }
 
@@ -107,7 +131,9 @@ function decodeVin(vin) {
 
   if (!resolvedModelId) {
     result.valid = false;
+    result.supported = false;
     result.validation_errors.push(`Unknown or unresolved model code: ${modelCode}`);
+    result.reason = "VIN nije podržan za trenutni dekoder.";
     result.confidence = "low";
     return result;
   }
@@ -116,7 +142,9 @@ function decodeVin(vin) {
 
   if (!modelRules) {
     result.valid = false;
+    result.supported = false;
     result.validation_errors.push(`Ruleset not found: ${resolvedModelId}`);
+    result.reason = "Nedostaju pravila za dekodiranje vozila.";
     result.confidence = "low";
     return result;
   }
@@ -148,7 +176,6 @@ function decodeVin(vin) {
     if (bodyData.special_flags?.motorsport) {
       result.special_flags.motorsport = true;
     }
-
   } else {
     result.warnings.push(`Unknown body code '${bodyCode}' for ruleset ${resolvedModelId}.`);
     downgradeConfidence(result, "medium");
@@ -157,7 +184,6 @@ function decodeVin(vin) {
   const engineData = modelRules.engine_map[engineCode];
 
   if (engineData) {
-
     result.engine.description = engineData.description ?? null;
     result.engine.fuel_type = engineData.fuel_type ?? null;
     result.engine.displacement_l = engineData.displacement_l ?? null;
@@ -168,6 +194,10 @@ function decodeVin(vin) {
       result.special_flags.motorsport = true;
     }
 
+    if (result.engine.power_kw.length > 1) {
+      result.warnings.push("Engine code maps to multiple possible power outputs.");
+      downgradeConfidence(result, "medium");
+    }
   } else {
     result.warnings.push(`Unknown engine code '${engineCode}' for ruleset ${resolvedModelId}.`);
     downgradeConfidence(result, "medium");
@@ -200,11 +230,25 @@ function decodeVin(vin) {
     downgradeConfidence(result, "medium");
   }
 
+  // kompatibilnost sa postojećim App.jsx
+  result.marka = "Skoda";
+  result.modelName = result.model.name;
+  result.model = [result.model.name, result.model.generation].filter(Boolean).join(" ");
+  result.motorKod = result.engine.code || "N/A";
+  result.motor = result.engine.description || "N/A";
+  result.menjac = inferGearbox(result);
+  result.modelYear = result.model_year.year || null;
+  result.drivetrain = result.body.drivetrain || "N/A";
+  result.fuelType = normalizeFuelLabel(result.engine.fuel_type);
+  result.candidates = result.possible_matches || [];
+  result.reason = result.valid
+    ? null
+    : (result.validation_errors.join(", ") || "VIN nije podržan");
+
   return result;
 }
 
 function resolveModelRuleset(modelCode, bodyCode, db, result) {
-
   const candidates = db?.resolver?.by_model_code?.[modelCode];
 
   if (!candidates || candidates.length === 0) {
@@ -232,34 +276,69 @@ function resolveModelRuleset(modelCode, bodyCode, db, result) {
 }
 
 function resolveManufacturer(wmi) {
-
   const map = {
     TMB: "Skoda Auto",
     XWW: "Skoda Auto",
-    XW8: "Skoda Auto"
+    XW8: "Skoda Auto",
   };
 
   return map[wmi] ?? "Unknown";
 }
 
 function resolveCountryHint(wmi) {
-
   const map = {
     TMB: "Czech Republic",
     XWW: "Kazakhstan",
-    XW8: "Russia"
+    XW8: "Russia",
   };
 
   return map[wmi] ?? null;
 }
 
 function downgradeConfidence(result, target) {
-
   const rank = { high: 3, medium: 2, low: 1 };
 
   if (rank[target] < rank[result.confidence]) {
     result.confidence = target;
   }
+}
+
+function normalizeFuelLabel(fuelType) {
+  const map = {
+    petrol: "Petrol",
+    diesel: "Diesel",
+    cng: "CNG",
+    phev: "PHEV",
+    hybrid: "Hybrid",
+    ev: "EV",
+  };
+
+  return map[fuelType] ?? "N/A";
+}
+
+function inferGearbox(result) {
+  const drivetrain = result.body?.drivetrain || "";
+  const fuelType = result.engine?.fuel_type || "";
+  const powerList = result.engine?.power_kw || [];
+  const maxPower = powerList.length ? Math.max(...powerList) : null;
+
+  if (fuelType === "ev") {
+    return "EV";
+  }
+
+  if (fuelType === "phev" || fuelType === "hybrid") {
+    return "DSG";
+  }
+
+  if (maxPower !== null && maxPower >= 140) {
+    return "DSG";
+  }
+
+  if (drivetrain === "AWD") {
+    return "DSG";
+  }
+
+  return "Manual";
 }
 
 export const decodeSkodaVin = decodeVin;
