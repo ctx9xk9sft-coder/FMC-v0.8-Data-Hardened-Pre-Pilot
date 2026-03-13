@@ -1,4 +1,9 @@
-function decodeVin(vin, db) {
+import vinDatabase from "../data/vin_database.json";
+
+function decodeVin(vin) {
+
+  const db = vinDatabase;
+
   const result = {
     vin: vin || "",
     valid: true,
@@ -139,16 +144,20 @@ function decodeVin(vin, db) {
     if (bodyData.special_flags?.n1) {
       result.special_flags.n1 = true;
     }
+
     if (bodyData.special_flags?.motorsport) {
       result.special_flags.motorsport = true;
     }
+
   } else {
     result.warnings.push(`Unknown body code '${bodyCode}' for ruleset ${resolvedModelId}.`);
     downgradeConfidence(result, "medium");
   }
 
   const engineData = modelRules.engine_map[engineCode];
+
   if (engineData) {
+
     result.engine.description = engineData.description ?? null;
     result.engine.fuel_type = engineData.fuel_type ?? null;
     result.engine.displacement_l = engineData.displacement_l ?? null;
@@ -159,16 +168,13 @@ function decodeVin(vin, db) {
       result.special_flags.motorsport = true;
     }
 
-    if (result.engine.power_kw.length > 1) {
-      result.warnings.push("Engine code maps to multiple possible power outputs.");
-      downgradeConfidence(result, "medium");
-    }
   } else {
     result.warnings.push(`Unknown engine code '${engineCode}' for ruleset ${resolvedModelId}.`);
     downgradeConfidence(result, "medium");
   }
 
   const restraintData = modelRules.airbag_map[airbagCode];
+
   if (restraintData) {
     result.restraint_system.description = restraintData;
   } else {
@@ -177,6 +183,7 @@ function decodeVin(vin, db) {
   }
 
   const year = modelRules.year_map[yearCode];
+
   if (year) {
     result.model_year.year = year;
   } else {
@@ -185,6 +192,7 @@ function decodeVin(vin, db) {
   }
 
   const plant = modelRules.plant_map[plantCode];
+
   if (plant) {
     result.plant.name = plant;
   } else {
@@ -196,6 +204,7 @@ function decodeVin(vin, db) {
 }
 
 function resolveModelRuleset(modelCode, bodyCode, db, result) {
+
   const candidates = db?.resolver?.by_model_code?.[modelCode];
 
   if (!candidates || candidates.length === 0) {
@@ -207,6 +216,7 @@ function resolveModelRuleset(modelCode, bodyCode, db, result) {
   }
 
   const disambiguation = db?.resolver?.disambiguation?.[modelCode];
+
   if (disambiguation?.position_4?.[bodyCode]) {
     result.warnings.push(`Model code ${modelCode} resolved by body code ${bodyCode}.`);
     downgradeConfidence(result, "medium");
@@ -222,26 +232,34 @@ function resolveModelRuleset(modelCode, bodyCode, db, result) {
 }
 
 function resolveManufacturer(wmi) {
+
   const map = {
     TMB: "Skoda Auto",
     XWW: "Skoda Auto",
     XW8: "Skoda Auto"
   };
+
   return map[wmi] ?? "Unknown";
 }
 
 function resolveCountryHint(wmi) {
+
   const map = {
     TMB: "Czech Republic",
     XWW: "Kazakhstan",
     XW8: "Russia"
   };
+
   return map[wmi] ?? null;
 }
 
 function downgradeConfidence(result, target) {
+
   const rank = { high: 3, medium: 2, low: 1 };
+
   if (rank[target] < rank[result.confidence]) {
     result.confidence = target;
   }
 }
+
+export { decodeVin };
