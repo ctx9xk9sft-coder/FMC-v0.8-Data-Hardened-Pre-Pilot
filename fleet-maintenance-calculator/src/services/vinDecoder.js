@@ -262,4 +262,4 @@ function downgradeConfidence(result, target) {
   }
 }
 
-export { decodeVin };
+export const decodeSkodaVin = decodeVin;
