@@ -1,4 +1,5 @@
 import engineCodesMaster from "../data/engine_codes_master.json" with { type: "json" };
+import gearboxCodesMaster from "../data/gearbox_codes_master.json" with { type: "json" };
 
 function unique(items) {
   return [...new Set((items || []).filter((x) => x !== null && x !== undefined && x !== ""))];
@@ -45,9 +46,33 @@ function pushRow(rule, item) {
   rule.engineFamilies.push(family);
 }
 
+function normalizeGearboxType(type) {
+  const t = String(type || "").trim().toLowerCase();
+
+  if (!t) return null;
+  if (t === "dsg") return "dsg";
+  if (t === "manual") return "manual";
+  if (t === "automatic") return "automatic";
+  if (t === "ev") return "ev";
+
+  return t;
+}
+
+function getGearboxSemanticTypes(codes = []) {
+  return unique(
+    (codes || [])
+      .map((code) => {
+        const master = gearboxCodesMaster?.[String(code || "").toUpperCase()] || null;
+        return normalizeGearboxType(master?.type);
+      })
+      .filter(Boolean)
+  ).sort();
+}
+
 function finalizeRule(rule) {
   const gearboxOptions = unique(rule.gearboxCodes).sort();
-  const hasGearboxConflict = gearboxOptions.length > 1;
+  const gearboxSemanticTypes = getGearboxSemanticTypes(gearboxOptions);
+  const hasGearboxConflict = gearboxSemanticTypes.length > 1;
 
   return {
     bodyCode: rule.bodyCode,
@@ -59,6 +84,7 @@ function finalizeRule(rule) {
     gearboxCode: gearboxOptions.length === 1 ? gearboxOptions[0] : null,
     gearboxOptions,
     gearboxCodes: gearboxOptions,
+    gearboxSemanticTypes,
     hasGearboxConflict,
     drivetrains: unique(rule.drivetrains).sort(),
     fuelTypes: unique(rule.fuelTypes).sort(),
