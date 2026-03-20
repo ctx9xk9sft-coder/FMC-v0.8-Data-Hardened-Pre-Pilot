@@ -1,9 +1,4 @@
-import fs from "fs";
-import path from "path";
-import engineCodesMaster from "../data/engine_codes_master.json" with { type: 'json' };
-
-const vinTrainingDatasetPath = path.resolve("src/data/vin_training_dataset.json");
-const vinTrainingDataset = JSON.parse(fs.readFileSync(vinTrainingDatasetPath, "utf-8"));
+import engineCodesMaster from "../data/engine_codes_master.json" with { type: "json" };
 
 function unique(items) {
   return [...new Set((items || []).filter((x) => x !== null && x !== undefined && x !== ""))];
@@ -51,6 +46,9 @@ function pushRow(rule, item) {
 }
 
 function finalizeRule(rule) {
+  const gearboxOptions = unique(rule.gearboxCodes).sort();
+  const hasGearboxConflict = gearboxOptions.length > 1;
+
   return {
     bodyCode: rule.bodyCode,
     platformCode: rule.platformCode,
@@ -58,7 +56,10 @@ function finalizeRule(rule) {
     models: unique(rule.models).sort(),
     modelYears: unique(rule.modelYears).sort((a, b) => Number(a || 0) - Number(b || 0)),
     engineCodes: unique(rule.engineCodes).sort(),
-    gearboxCodes: unique(rule.gearboxCodes).sort(),
+    gearboxCode: gearboxOptions.length === 1 ? gearboxOptions[0] : null,
+    gearboxOptions,
+    gearboxCodes: gearboxOptions,
+    hasGearboxConflict,
     drivetrains: unique(rule.drivetrains).sort(),
     fuelTypes: unique(rule.fuelTypes).sort(),
     fuels: unique(rule.fuels).sort(),
@@ -108,9 +109,4 @@ export function buildVinPatternRules(dataset) {
   return finalized;
 }
 
-const rules = buildVinPatternRules(vinTrainingDataset);
-const outputPath = path.resolve("src/data/vin_pattern_rules.json");
-fs.writeFileSync(outputPath, JSON.stringify(rules, null, 2), "utf-8");
-
-console.log(`vin_pattern_rules.json generated: ${outputPath}`);
-console.log(`Total pattern rules: ${Object.keys(rules).length}`);
+export default buildVinPatternRules;

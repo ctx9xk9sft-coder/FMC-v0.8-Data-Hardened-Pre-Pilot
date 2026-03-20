@@ -219,6 +219,8 @@ function resolveGearbox(decoded, manualOverrides = {}) {
   const exactCode = decoded?.enrichment?.exactVinMatch?.transmissionCode || null;
   const selectedCode = decoded?.enrichment?.selectedGearbox?.code || null;
   const inferredDisplay = isNonEmptyString(decoded?.menjac) ? decoded.menjac.trim() : null;
+  const patternRuleConflict = decoded?.enrichment?.patternRuleConflict || null;
+  const hasPatternGearboxConflict = patternRuleConflict?.field === "gearbox";
 
   const candidates = uniqueStrings([
     exactCode,
@@ -284,6 +286,24 @@ function resolveGearbox(decoded, manualOverrides = {}) {
       ]),
       reason: null,
       semantic,
+    };
+  }
+
+  if (hasPatternGearboxConflict) {
+    return {
+      field: "gearbox",
+      resolved: false,
+      value: null,
+      displayValue: inferredDisplay,
+      source: "pattern_rule_conflict",
+      confidence: "low",
+      exact: false,
+      candidates,
+      warnings: ["gearbox_pattern_rule_conflict"],
+      reason: "gearbox_conflict",
+      semantic: getGearboxSemanticProfile(inferredDisplay, candidates, { allowLabelInference: false }),
+      conflict: patternRuleConflict,
+      possibleValues: uniqueStrings(patternRuleConflict?.options || candidates),
     };
   }
 
@@ -373,7 +393,10 @@ function applyInferenceFallback({ decoded, fields, overrides = {} }) {
     inferredEngine = true;
   }
 
-  if (!manualGearbox && !fields?.gearbox?.resolved && inference?.gearbox?.selected) {
+  const gearboxBlockedByPatternConflict =
+    fields?.gearbox?.reason === "gearbox_conflict" || decoded?.enrichment?.patternRuleConflict?.field === "gearbox";
+
+  if (!manualGearbox && !gearboxBlockedByPatternConflict && !fields?.gearbox?.resolved && inference?.gearbox?.selected) {
     const inferenceCandidates = getInferenceCandidateList(inference, "gearbox");
     const mergedCandidates = uniqueStrings([
       ...(fields?.gearbox?.candidates || []),
@@ -475,6 +498,10 @@ function determineInternalStatus({ supported, fields, usedInference, inferredEng
     return inferenceUsed ? "partial_inferred" : "needs_manual_input";
   }
 
+  if (fields?.gearbox?.reason === "gearbox_conflict") {
+    return "partial_inferred";
+  }
+
   if (fullyResolvedWithoutInference) {
     return "ready_exact";
   }
@@ -518,6 +545,17 @@ function toVehicleStatus({ internalStatus }) {
   if (internalStatus === "ready_exact") return "ready_for_planning";
   if (["ready_high_confidence_inferred", "partial_inferred"].includes(internalStatus)) return "partial_inferred";
   return "needs_manual_input";
+}
+
+function buildResolutionReason(fields = {}, internalStatus = "unresolved") {
+  if (internalStatus === "invalid") return "vin_not_supported";
+  if (fields?.gearbox?.reason === "gearbox_conflict") return "gearbox_conflict";
+  if (fields?.gearbox?.reason) return fields.gearbox.reason;
+  if (fields?.engine?.reason) return fields.engine.reason;
+  if (fields?.drivetrain?.reason) return fields.drivetrain.reason;
+  if (fields?.model?.reason) return fields.model.reason;
+  if (fields?.modelYear?.reason) return fields.modelYear.reason;
+  return null;
 }
 
 function buildMissingConfirmations(fields, internalStatus) {
@@ -615,6 +653,7 @@ export function resolveVehicleConfiguration({ vin, decoded, validation = null, m
   const operationalReadiness = determineOperationalReadiness(internalStatus);
   const canonicalStatus = toVehicleStatus({ internalStatus });
   const missingConfirmations = buildMissingConfirmations(fields, internalStatus);
+  const reason = buildResolutionReason(fields, internalStatus);
 
   const hasMissingConfirmations =
     Array.isArray(missingConfirmations) && missingConfirmations.length > 0;
@@ -640,6 +679,7 @@ export function resolveVehicleConfiguration({ vin, decoded, validation = null, m
     internalStatus,
     operationalReadiness,
     resolutionStatus,
+    reason,
     vehicle: canonicalVehicle,
     canonicalVehicle,
     fields,

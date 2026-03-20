@@ -150,6 +150,33 @@ function shouldAutoSelectPatternRuleValue(rule, field = null) {
   return hasStrongPatternRuleSupport(rule, field);
 }
 
+function getPatternRuleGearboxOptions(rule) {
+  return unique([
+    ...(Array.isArray(rule?.gearboxOptions) ? rule.gearboxOptions : []),
+    ...(Array.isArray(rule?.gearboxCodes) ? rule.gearboxCodes : []),
+    rule?.gearboxCode || null,
+  ]).sort();
+}
+
+function buildPatternRuleConflict(rule, field, options = []) {
+  const normalizedOptions = unique(options).sort();
+  if (!rule || !field || normalizedOptions.length <= 1) return null;
+
+  return {
+    field,
+    reason: `${field}_conflict`,
+    options: normalizedOptions,
+    source: 'vin_pattern_rule',
+    scope: rule?.scope || 'base',
+    sampleCount: Number(rule?.sampleCount || 0),
+    parentSampleCount: Number(rule?.parentSampleCount || rule?.sampleCount || 0),
+    bodyCode: rule?.bodyCode || null,
+    platformCode: rule?.platformCode || null,
+    modelYears: Array.isArray(rule?.modelYears) ? [...rule.modelYears] : [],
+    hasConflict: true,
+  };
+}
+
 function decodeVin(vin) {
   const db = vinDatabase;
 
@@ -258,6 +285,7 @@ function decodeVin(vin) {
       selectedGearbox: null,
       masterEngine: null,
       masterGearbox: null,
+      patternRuleConflict: null,
       source: "legacy_vin_decoder",
     },
 
@@ -643,13 +671,20 @@ function applyVinPatternRule(result, rule) {
     }
   }
 
-  if (Array.isArray(rule.gearboxCodes) && rule.gearboxCodes.length > 0) {
+  const patternGearboxOptions = getPatternRuleGearboxOptions(rule);
+  if (patternGearboxOptions.length > 0) {
     result.enrichment.possibleGearboxCodes = unique([
       ...result.enrichment.possibleGearboxCodes,
-      ...rule.gearboxCodes,
+      ...patternGearboxOptions,
     ]);
     if (result.enrichment.gearboxSource === "not_enriched") {
       result.enrichment.gearboxSource = "vin_pattern_rule";
+    }
+
+    if (patternGearboxOptions.length > 1 || rule?.hasGearboxConflict) {
+      result.enrichment.patternRuleConflict = buildPatternRuleConflict(rule, 'gearbox', patternGearboxOptions);
+      result.gearboxCode = null;
+      result.gearboxCodeSource = 'pattern_rule_conflict';
     }
   }
 
@@ -691,8 +726,13 @@ function applyVinPatternRule(result, rule) {
     }
   }
 
-  if (shouldAutoSelectPatternRuleValue(rule, "gearboxCodes") && !result.enrichment.selectedGearbox) {
-    const code = rule.gearboxCodes[0];
+  const canAutoSelectPatternGearbox =
+    !result.enrichment.patternRuleConflict &&
+    patternGearboxOptions.length === 1 &&
+    hasStrongPatternRuleSupport(rule, 'gearboxCodes');
+
+  if (canAutoSelectPatternGearbox && !result.enrichment.selectedGearbox) {
+    const code = patternGearboxOptions[0];
     const master = gearboxCodesMaster?.[code] || null;
     if (master) {
       result.enrichment.masterGearbox = master;
@@ -704,7 +744,7 @@ function applyVinPatternRule(result, rule) {
     }
   }
 
-  if (shouldAutoSelectPatternRuleValue(rule, "engineCodes") && shouldAutoSelectPatternRuleValue(rule, "gearboxCodes")) {
+  if (shouldAutoSelectPatternRuleValue(rule, "engineCodes") && canAutoSelectPatternGearbox) {
     if (result.confidence !== "exact") {
       result.confidence = "high";
     }
@@ -873,6 +913,11 @@ function enrichWithGearboxCodes(result) {
   if (seedCodes.length > 1) {
     result.enrichment.possibleGearboxCodes = unique(seedCodes);
 
+    if (result.enrichment?.patternRuleConflict?.field === 'gearbox') {
+      result.gearboxCode = null;
+      result.gearboxCodeSource = 'pattern_rule_conflict';
+    }
+
     const seedTechCandidates = seedCodes
       .map((code) => gearboxCodesDb?.models?.[toEnrichmentModelKey(result.model_info.name)]?.find((item) => item.code === code)?.tech_info)
       .filter(Boolean);
@@ -1020,8 +1065,13 @@ function finalizeUiFields(result) {
     result.gearboxCode = result.enrichment.possibleGearboxCodes[0];
     result.gearboxCodeSource = result.enrichment.gearboxSource;
   } else if (result.enrichment.possibleGearboxCodes.length > 1) {
-    result.gearboxCode = result.enrichment.possibleGearboxCodes.join(", ");
-    result.gearboxCodeSource = result.enrichment.gearboxSource;
+    if (result.enrichment?.patternRuleConflict?.field === 'gearbox') {
+      result.gearboxCode = null;
+      result.gearboxCodeSource = 'pattern_rule_conflict';
+    } else {
+      result.gearboxCode = result.enrichment.possibleGearboxCodes.join(", ");
+      result.gearboxCodeSource = result.enrichment.gearboxSource;
+    }
   }
 
   applyOilDataToUi(result);
@@ -1413,6 +1463,10 @@ function normalizeFuelLabel(fuelType) {
 }
 
 function inferGearbox(result) {
+  if (result?.enrichment?.patternRuleConflict?.field === "gearbox") {
+    return null;
+  }
+
   const selectedMasterGearbox = result.enrichment?.masterGearbox;
   if (selectedMasterGearbox?.type === "manual") {
     return "Manual";
