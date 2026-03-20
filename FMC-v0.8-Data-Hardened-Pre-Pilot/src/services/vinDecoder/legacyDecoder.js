@@ -80,13 +80,30 @@ function getMasterGearboxClassification(code) {
 
 function inferGearboxFromCode(code) {
   const classified = getMasterGearboxClassification(code);
+  const normalizedType = String(classified?.type || "").toLowerCase();
 
-  if (classified?.type === "manual") return "Manual";
-  if (classified?.type === "DSG") return "DSG";
-  if (classified?.type === "automatic") return "Automatic";
-  if (classified?.type === "ev") return "EV";
+  if (normalizedType === "manual") return "Manual";
+  if (normalizedType === "dsg") return "DSG";
+  if (normalizedType === "automatic") return "Automatic";
+  if (normalizedType === "ev") return "EV";
 
   return null;
+}
+
+function inferGearboxFromCandidateCodes(codes = []) {
+  const uniqueCodes = unique(codes);
+  if (uniqueCodes.length === 0) return null;
+
+  const classifications = uniqueCodes
+    .map((code) => getMasterGearboxClassification(code))
+    .filter(Boolean);
+
+  if (classifications.length !== uniqueCodes.length) return null;
+
+  const types = unique(classifications.map((item) => item?.type || null));
+  if (types.length !== 1) return null;
+
+  return inferGearboxFromCode(classifications[0].code);
 }
 
 
@@ -681,7 +698,7 @@ function applyVinPatternRule(result, rule) {
       result.enrichment.gearboxSource = "vin_pattern_rule";
     }
 
-    if (patternGearboxOptions.length > 1 || rule?.hasGearboxConflict) {
+    if (rule?.hasGearboxConflict) {
       result.enrichment.patternRuleConflict = buildPatternRuleConflict(rule, 'gearbox', patternGearboxOptions);
       result.gearboxCode = null;
       result.gearboxCodeSource = 'pattern_rule_conflict';
@@ -1487,12 +1504,9 @@ function inferGearbox(result) {
     return exactClassification;
   }
 
-  if (result.enrichment?.possibleGearboxCodes?.length === 1) {
-    const soleCode = result.enrichment.possibleGearboxCodes[0];
-    const soleClassification = inferGearboxFromCode(soleCode);
-    if (soleClassification) {
-      return soleClassification;
-    }
+  const candidateClassification = inferGearboxFromCandidateCodes(result.enrichment?.possibleGearboxCodes || []);
+  if (candidateClassification) {
+    return candidateClassification;
   }
 
   const drivetrain = result.body?.drivetrain || "";
