@@ -89,8 +89,6 @@ function inferGearboxFromCode(code) {
   return null;
 }
 
-
-
 function isPatternRuleCompatible(result, rule) {
   if (!rule) return false;
 
@@ -107,6 +105,15 @@ function isPatternRuleCompatible(result, rule) {
 function getApplicablePatternRule(result, rawRule) {
   if (!rawRule) return null;
 
+  const parentMetadata = {
+    parentSampleCount: Number(rawRule.sampleCount || 0),
+    parentModels: Array.isArray(rawRule.models) ? [...rawRule.models] : [],
+    parentEngineCodes: Array.isArray(rawRule.engineCodes) ? [...rawRule.engineCodes] : [],
+    parentDrivetrains: Array.isArray(rawRule.drivetrains) ? [...rawRule.drivetrains] : [],
+    parentGearboxSemanticTypes: Array.isArray(rawRule.gearboxSemanticTypes) ? [...rawRule.gearboxSemanticTypes] : [],
+    parentHasGearboxConflict: Boolean(rawRule.hasGearboxConflict),
+  };
+
   const modelYear = result?.model_year?.year || null;
   if (modelYear != null) {
     const scopedRule = rawRule?.byModelYear?.[String(modelYear)] || null;
@@ -116,8 +123,8 @@ function getApplicablePatternRule(result, rawRule) {
         bodyCode: rawRule.bodyCode,
         platformCode: rawRule.platformCode,
         sampleCount: Number(scopedRule.sampleCount || 0),
-        parentSampleCount: Number(rawRule.sampleCount || 0),
-        scope: 'model_year',
+        ...parentMetadata,
+        scope: "model_year",
         scopedModelYear: modelYear,
       };
     }
@@ -128,8 +135,8 @@ function getApplicablePatternRule(result, rawRule) {
   return {
     ...rawRule,
     sampleCount: Number(rawRule.sampleCount || 0),
-    parentSampleCount: Number(rawRule.sampleCount || 0),
-    scope: 'base',
+    ...parentMetadata,
+    scope: "base",
     scopedModelYear: null,
   };
 }
@@ -143,11 +150,56 @@ function hasStrongPatternRuleSupport(rule, field = null) {
   return sampleCount >= 2 && values.length === 1;
 }
 
+function hasSafeYearScopedPatternClosure(rule, field = null) {
+  if (!rule || !field) return false;
+  if (rule?.scope !== "model_year") return false;
+
+  const sampleCount = Number(rule?.sampleCount || 0);
+  const parentSampleCount = Number(rule?.parentSampleCount || 0);
+  if (sampleCount !== 1 || parentSampleCount < 3) return false;
+
+  const singleFieldValues = Array.isArray(rule?.[field]) ? unique(rule[field].filter(Boolean)) : [];
+  if (singleFieldValues.length !== 1) return false;
+
+  const singleModels = unique((rule?.models || []).filter(Boolean));
+  const singleEngineCodes = unique((rule?.engineCodes || []).filter(Boolean));
+  const singleDrivetrains = unique((rule?.drivetrains || []).filter(Boolean));
+  const parentModels = unique((rule?.parentModels || []).filter(Boolean));
+  const parentEngineCodes = unique((rule?.parentEngineCodes || []).filter(Boolean));
+  const parentDrivetrains = unique((rule?.parentDrivetrains || []).filter(Boolean));
+
+  if (
+    singleModels.length !== 1 ||
+    singleEngineCodes.length !== 1 ||
+    singleDrivetrains.length !== 1 ||
+    parentModels.length !== 1 ||
+    parentEngineCodes.length !== 1 ||
+    parentDrivetrains.length !== 1
+  ) {
+    return false;
+  }
+
+  if (field === "gearboxCodes") {
+    const semanticTypes = unique((rule?.gearboxSemanticTypes || []).filter(Boolean));
+    const parentSemanticTypes = unique((rule?.parentGearboxSemanticTypes || []).filter(Boolean));
+    if (
+      Boolean(rule?.hasGearboxConflict) ||
+      Boolean(rule?.parentHasGearboxConflict) ||
+      semanticTypes.length !== 1 ||
+      parentSemanticTypes.length !== 1
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function shouldAutoSelectPatternRuleValue(rule, field = null) {
   if (!rule || !field) return false;
   const values = Array.isArray(rule?.[field]) ? rule[field].filter(Boolean) : [];
   if (values.length !== 1) return false;
-  return hasStrongPatternRuleSupport(rule, field);
+  return hasStrongPatternRuleSupport(rule, field) || hasSafeYearScopedPatternClosure(rule, field);
 }
 
 function getPatternRuleGearboxOptions(rule) {
@@ -166,8 +218,8 @@ function buildPatternRuleConflict(rule, field, options = []) {
     field,
     reason: `${field}_conflict`,
     options: normalizedOptions,
-    source: 'vin_pattern_rule',
-    scope: rule?.scope || 'base',
+    source: "vin_pattern_rule",
+    scope: rule?.scope || "base",
     sampleCount: Number(rule?.sampleCount || 0),
     parentSampleCount: Number(rule?.parentSampleCount || rule?.sampleCount || 0),
     bodyCode: rule?.bodyCode || null,
@@ -682,9 +734,9 @@ function applyVinPatternRule(result, rule) {
     }
 
     if (patternGearboxOptions.length > 1 || rule?.hasGearboxConflict) {
-      result.enrichment.patternRuleConflict = buildPatternRuleConflict(rule, 'gearbox', patternGearboxOptions);
+      result.enrichment.patternRuleConflict = buildPatternRuleConflict(rule, "gearbox", patternGearboxOptions);
       result.gearboxCode = null;
-      result.gearboxCodeSource = 'pattern_rule_conflict';
+      result.gearboxCodeSource = "pattern_rule_conflict";
     }
   }
 
@@ -729,7 +781,7 @@ function applyVinPatternRule(result, rule) {
   const canAutoSelectPatternGearbox =
     !result.enrichment.patternRuleConflict &&
     patternGearboxOptions.length === 1 &&
-    hasStrongPatternRuleSupport(rule, 'gearboxCodes');
+    (hasStrongPatternRuleSupport(rule, "gearboxCodes") || hasSafeYearScopedPatternClosure(rule, "gearboxCodes"));
 
   if (canAutoSelectPatternGearbox && !result.enrichment.selectedGearbox) {
     const code = patternGearboxOptions[0];
@@ -789,7 +841,26 @@ function enrichWithEngineCodes(result) {
   const fuelType = result.engine?.fuel_type ?? null;
   const powers = Array.isArray(result.engine?.power_kw) ? result.engine.power_kw : [];
 
-  const candidates = Object.values(engines)
+  const candidates = Object.entries(engines)
+    .map(([code, raw]) => {
+      const item = {
+        code,
+        ...raw,
+        kw: raw?.powerKw ?? raw?.kw ?? null,
+        fuel_type: raw?.fuel ?? raw?.fuel_type ?? null,
+        displacement_l: raw?.displacementL ?? raw?.displacement_l ?? null,
+        oil_capacity_l: raw?.oilCapacityL ?? raw?.oil_capacity_l ?? null,
+        oil_spec: raw?.oilSpec ?? raw?.oil_spec ?? null,
+        oil_viscosity: raw?.oilViscosity ?? raw?.oil_viscosity ?? null,
+        notes: raw?.description ?? raw?.notes ?? null,
+        family: raw?.family ?? null,
+        engineUnit: raw?.engineUnit ?? raw?.engine_unit ?? null,
+        applications: Array.isArray(raw?.applications) ? raw.applications : [],
+        models: Array.isArray(raw?.models) ? raw.models : [],
+      };
+
+      return item;
+    })
     .filter((item) =>
       isEngineCandidateCompatible(
         item,
@@ -803,6 +874,7 @@ function enrichWithEngineCodes(result) {
     )
     .map((item) => {
       const matchedApplications = filterMatchingApplications(item, modelKey, modelYear);
+
       return {
         ...item,
         matchedApplications,
@@ -887,7 +959,14 @@ function enrichWithGearboxCodes(result) {
     .map((code) => (code ? { code, ...(gearboxCodesMaster?.[code] || {}) } : null))
     .filter(Boolean);
 
-  if (seedMasters.length === 1 && (exactTransmissionCode || hasStrongPatternRuleSupport(result.enrichment?.patternRule, "gearboxCodes"))) {
+  if (
+    seedMasters.length === 1 &&
+    (
+      exactTransmissionCode ||
+      hasStrongPatternRuleSupport(result.enrichment?.patternRule, "gearboxCodes") ||
+      hasSafeYearScopedPatternClosure(result.enrichment?.patternRule, "gearboxCodes")
+    )
+  ) {
     result.enrichment.selectedGearbox = seedMasters[0];
     result.enrichment.masterGearbox =
       gearboxCodesMaster?.[seedMasters[0].code] || result.enrichment.masterGearbox;
@@ -913,9 +992,9 @@ function enrichWithGearboxCodes(result) {
   if (seedCodes.length > 1) {
     result.enrichment.possibleGearboxCodes = unique(seedCodes);
 
-    if (result.enrichment?.patternRuleConflict?.field === 'gearbox') {
+    if (result.enrichment?.patternRuleConflict?.field === "gearbox") {
       result.gearboxCode = null;
-      result.gearboxCodeSource = 'pattern_rule_conflict';
+      result.gearboxCodeSource = "pattern_rule_conflict";
     }
 
     const seedTechCandidates = seedCodes
@@ -1065,9 +1144,9 @@ function finalizeUiFields(result) {
     result.gearboxCode = result.enrichment.possibleGearboxCodes[0];
     result.gearboxCodeSource = result.enrichment.gearboxSource;
   } else if (result.enrichment.possibleGearboxCodes.length > 1) {
-    if (result.enrichment?.patternRuleConflict?.field === 'gearbox') {
+    if (result.enrichment?.patternRuleConflict?.field === "gearbox") {
       result.gearboxCode = null;
-      result.gearboxCodeSource = 'pattern_rule_conflict';
+      result.gearboxCodeSource = "pattern_rule_conflict";
     } else {
       result.gearboxCode = result.enrichment.possibleGearboxCodes.join(", ");
       result.gearboxCodeSource = result.enrichment.gearboxSource;
