@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-20T15:09:19.991Z",
+  "generatedAt": "2026-03-20T20:43:26.200Z",
   "runtimeModulesUsed": [
     "src/services/vinDecoder.js#decodeSkodaVin",
     "src/services/tcoCalculator.js#calculateMaintenanceValidation",
@@ -241,11 +241,12 @@
         "partial_inferred": 10
       },
       "unknown": {
+        "partial_inferred": 53,
         "needs_manual_input": 5
       },
       "DQ200": {
-        "partial_inferred": 59,
-        "ready_exact": 36
+        "ready_exact": 36,
+        "partial_inferred": 6
       },
       "DQ381": {
         "partial_inferred": 41,
@@ -260,7 +261,7 @@
   "topClusters": {
     "partialInferred": [
       {
-        "key": "Octavia | IV | AR8 | NX | 2026 | EA211 evo | DQ200",
+        "key": "Octavia | IV | AR8 | NX | 2026 | EA211 evo | unknown",
         "count": 27
       },
       {
@@ -268,11 +269,11 @@
         "count": 22
       },
       {
-        "key": "Kamiq | I | GR6 | NW | 2026 | EA211 | DQ200",
+        "key": "Kamiq | I | GR6 | NW | 2026 | EA211 | unknown",
         "count": 20
       },
       {
-        "key": "Octavia | IV | AA8 | NX | 2026 | EA211 evo | DQ200",
+        "key": "Octavia | IV | AA8 | NX | 2026 | EA211 evo | unknown",
         "count": 6
       },
       {
@@ -320,6 +321,18 @@
     ],
     "blocked": [],
     "gearboxUnresolved": [
+      {
+        "key": "Octavia | IV | AR8 | NX | 2026 | EA211 evo | unknown",
+        "count": 27
+      },
+      {
+        "key": "Kamiq | I | GR6 | NW | 2026 | EA211 | unknown",
+        "count": 20
+      },
+      {
+        "key": "Octavia | IV | AA8 | NX | 2026 | EA211 evo | unknown",
+        "count": 6
+      },
       {
         "key": "Enyaq | I | JH9 | NY | 2024 | 1.8 TSI | unknown",
         "count": 2

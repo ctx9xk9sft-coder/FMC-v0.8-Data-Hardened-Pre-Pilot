@@ -277,7 +277,7 @@ export const GOLDEN_CASES = [
   {
     id: "unknown_octavia_pattern_inferred_not_ready",
     group: "near_known_failure",
-    name: "Unknown Octavia VIN uses safe inference fallback but stays non-plannable",
+    name: "Unknown Octavia VIN keeps gearbox conflict partial and non-plannable",
     vin: "TMBAA8NX1TM999998",
     plannedKm: 120000,
     contractMonths: 36,
@@ -301,6 +301,7 @@ export const GOLDEN_CASES = [
       resolutionStatus: "partial_inferred",
       internalStatus: "partial_inferred",
       operationalReadiness: "manual_review_required",
+      missingConfirmations: ["gearbox"],
       canPlan: false,
       engine: "DXDE",
       drivetrain: "FWD",
