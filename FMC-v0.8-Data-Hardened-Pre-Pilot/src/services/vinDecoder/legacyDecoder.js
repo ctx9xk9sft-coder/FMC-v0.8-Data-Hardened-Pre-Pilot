@@ -61,6 +61,214 @@ function decodeEngineFamilyFromVinCode(code) {
   return map[code] || null;
 }
 
+function createDecodeResult(vin) {
+  return {
+    vin: vin || "",
+    valid: true,
+    supported: true,
+    reason: null,
+    validation_errors: [],
+
+    wmi: {
+      code: null,
+      manufacturer: null,
+      country_hint: null,
+    },
+
+    model_info: {
+      raw_code: null,
+      resolved_ruleset: null,
+      name: null,
+      generation: null,
+    },
+
+    body: {
+      code: null,
+      style: null,
+      normalized_style: null,
+      steering: null,
+      drivetrain: null,
+    },
+
+    engine: {
+      code: null,
+      description: null,
+      fuel_type: null,
+      displacement_l: null,
+      power_kw: [],
+      power_kw_display: null,
+      unit_code: null,
+      family: null,
+    },
+
+    restraint_system: {
+      code: null,
+      description: null,
+    },
+
+    model_year: {
+      code: null,
+      year: null,
+    },
+
+    plant: {
+      code: null,
+      name: null,
+    },
+
+    serial_number: null,
+
+    special_flags: {
+      n1: false,
+      motorsport: false,
+      ambiguous_model: false,
+    },
+
+    confidence: "high",
+    warnings: [],
+    possible_matches: [],
+    patternMatch: false,
+
+    vin_summary: {
+      manufacturer: null,
+      country_hint: null,
+      model: null,
+      generation: null,
+      body_style: null,
+      steering: null,
+      drivetrain: null,
+      fuel_type: null,
+      power_kw: null,
+      model_year: null,
+      plant: null,
+    },
+
+    vin_codes: {
+      wmi: null,
+      body_code: null,
+      engine_code: null,
+      restraint_code: null,
+      model_code: null,
+      year_code: null,
+      plant_code: null,
+      serial_number: null,
+    },
+
+    enrichment: {
+      exactVinMatch: null,
+      patternRule: null,
+      possibleEngineCodes: [],
+      engineCandidates: [],
+      possibleGearboxCodes: [],
+      gearboxTechCandidates: [],
+      engineSource: "not_enriched",
+      gearboxSource: "not_enriched",
+      selectedEngine: null,
+      selectedGearbox: null,
+      masterEngine: null,
+      masterGearbox: null,
+      patternRuleConflict: null,
+      source: "legacy_vin_decoder",
+    },
+
+    marka: "Skoda",
+    model: null,
+    motorKod: null,
+    motor: null,
+    menjac: null,
+    menjacSource: "inferred",
+    modelYear: null,
+    drivetrain: null,
+    gearboxCode: "N/A",
+    gearboxCodeSource: "not_available_from_vin",
+    fuelType: null,
+    oilCapacity: "N/A",
+    oilSpec: "N/A",
+    oilSae: "N/A",
+    hourlyRate: 5500,
+    candidates: [],
+  };
+}
+
+function validateAndNormalizeVinInput(result, vin) {
+  if (typeof vin !== "string") {
+    result.valid = false;
+    result.supported = false;
+    result.validation_errors.push("VIN must be a string.");
+    result.reason = "VIN mora biti tekst.";
+    result.confidence = "low";
+    return null;
+  }
+
+  const cleanVin = vin.trim().toUpperCase();
+  result.vin = cleanVin;
+
+  if (cleanVin.length !== 17) {
+    result.valid = false;
+    result.supported = false;
+    result.validation_errors.push("VIN must be exactly 17 characters long.");
+  }
+
+  if (/[^A-HJ-NPR-Z0-9]/.test(cleanVin)) {
+    result.valid = false;
+    result.supported = false;
+    result.validation_errors.push("VIN contains invalid characters.");
+  }
+
+  if (!result.valid) {
+    result.confidence = "low";
+    result.reason =
+      result.validation_errors.join(", ") || "VIN nije podržan";
+    return null;
+  }
+
+  return cleanVin;
+}
+
+function parseVinStructure(cleanVin) {
+  return {
+    cleanVin,
+    wmi: cleanVin.slice(0, 3),
+    shortBodyCode: cleanVin[3],
+    engineCodeFromVin: cleanVin[4],
+    airbagCode: cleanVin[5],
+    modelCode: cleanVin.slice(6, 8),
+    yearCode: cleanVin[9],
+    plantCode: cleanVin[10],
+    serialNumber: cleanVin.slice(11, 17),
+    fullBodyCode: getBodyCode(cleanVin),
+    platformCode: getPlatformCode(cleanVin),
+    engineFamilyFromVin: decodeEngineFamilyFromVinCode(cleanVin[4]),
+  };
+}
+
+function applyVinStructure(result, structure) {
+  result.wmi.code = structure.wmi;
+  result.body.code = structure.shortBodyCode;
+  result.engine.code = structure.engineCodeFromVin;
+  result.restraint_system.code = structure.airbagCode;
+  result.model_info.raw_code = structure.modelCode;
+  result.model_year.code = structure.yearCode;
+  result.plant.code = structure.plantCode;
+  result.serial_number = structure.serialNumber;
+
+  result.vin_codes.wmi = structure.wmi;
+  result.vin_codes.body_code = structure.shortBodyCode;
+  result.vin_codes.engine_code = structure.engineCodeFromVin;
+  result.vin_codes.restraint_code = structure.airbagCode;
+  result.vin_codes.model_code = structure.modelCode;
+  result.vin_codes.year_code = structure.yearCode;
+  result.vin_codes.plant_code = structure.plantCode;
+  result.vin_codes.serial_number = structure.serialNumber;
+
+  result.wmi.manufacturer = resolveManufacturer(structure.wmi);
+  result.wmi.country_hint = resolveCountryHint(structure.wmi);
+
+  if (structure.engineFamilyFromVin) {
+    result.engine.family = structure.engineFamilyFromVin;
+  }
+}
+
 function getMasterGearboxClassification(code) {
   if (!code) return null;
 
@@ -230,241 +438,42 @@ function buildPatternRuleConflict(rule, field, options = []) {
 }
 
 function decodeVin(vin) {
-  const db = vinDatabase;
+  const result = createDecodeResult(vin);
+  const cleanVin = validateAndNormalizeVinInput(result, vin);
 
-  const result = {
-    vin: vin || "",
-    valid: true,
-    supported: true,
-    reason: null,
-    validation_errors: [],
-
-    wmi: {
-      code: null,
-      manufacturer: null,
-      country_hint: null,
-    },
-
-    model_info: {
-      raw_code: null,
-      resolved_ruleset: null,
-      name: null,
-      generation: null,
-    },
-
-    body: {
-      code: null,
-      style: null,
-      normalized_style: null,
-      steering: null,
-      drivetrain: null,
-    },
-
-    engine: {
-      code: null,
-      description: null,
-      fuel_type: null,
-      displacement_l: null,
-      power_kw: [],
-      power_kw_display: null,
-      unit_code: null,
-      family: null,
-    },
-
-    restraint_system: {
-      code: null,
-      description: null,
-    },
-
-    model_year: {
-      code: null,
-      year: null,
-    },
-
-    plant: {
-      code: null,
-      name: null,
-    },
-
-    serial_number: null,
-
-    special_flags: {
-      n1: false,
-      motorsport: false,
-      ambiguous_model: false,
-    },
-
-    confidence: "high",
-    warnings: [],
-    possible_matches: [],
-    patternMatch: false,
-
-    vin_summary: {
-      manufacturer: null,
-      country_hint: null,
-      model: null,
-      generation: null,
-      body_style: null,
-      steering: null,
-      drivetrain: null,
-      fuel_type: null,
-      power_kw: null,
-      model_year: null,
-      plant: null,
-    },
-
-    vin_codes: {
-      wmi: null,
-      body_code: null,
-      engine_code: null,
-      restraint_code: null,
-      model_code: null,
-      year_code: null,
-      plant_code: null,
-      serial_number: null,
-    },
-
-    enrichment: {
-      exactVinMatch: null,
-      patternRule: null,
-      possibleEngineCodes: [],
-      engineCandidates: [],
-      possibleGearboxCodes: [],
-      gearboxTechCandidates: [],
-      engineSource: "not_enriched",
-      gearboxSource: "not_enriched",
-      selectedEngine: null,
-      selectedGearbox: null,
-      masterEngine: null,
-      masterGearbox: null,
-      patternRuleConflict: null,
-      source: "legacy_vin_decoder",
-    },
-
-    marka: "Skoda",
-    model: null,
-    motorKod: null,
-    motor: null,
-    menjac: null,
-    menjacSource: "inferred",
-    modelYear: null,
-    drivetrain: null,
-    gearboxCode: "N/A",
-    gearboxCodeSource: "not_available_from_vin",
-    fuelType: null,
-    oilCapacity: "N/A",
-    oilSpec: "N/A",
-    oilSae: "N/A",
-    hourlyRate: 5500,
-    candidates: [],
-  };
-
-  if (typeof vin !== "string") {
-    result.valid = false;
-    result.supported = false;
-    result.validation_errors.push("VIN must be a string.");
-    result.reason = "VIN mora biti tekst.";
-    result.confidence = "low";
+  if (!cleanVin) {
     return result;
   }
 
-  const cleanVin = vin.trim().toUpperCase();
-  result.vin = cleanVin;
+  const structure = parseVinStructure(cleanVin);
+  applyVinStructure(result, structure);
 
-  if (cleanVin.length !== 17) {
-    result.valid = false;
-    result.supported = false;
-    result.validation_errors.push("VIN must be exactly 17 characters long.");
-  }
-
-  if (/[^A-HJ-NPR-Z0-9]/.test(cleanVin)) {
-    result.valid = false;
-    result.supported = false;
-    result.validation_errors.push("VIN contains invalid characters.");
-  }
-
-  if (!result.valid) {
-    result.confidence = "low";
-    result.reason =
-      result.validation_errors.join(", ") || "VIN nije podržan";
-    return result;
-  }
-
-  const wmi = cleanVin.slice(0, 3);
-  const shortBodyCode = cleanVin[3];
-  const engineCodeFromVin = cleanVin[4];
-  const airbagCode = cleanVin[5];
-  const modelCode = cleanVin.slice(6, 8);
-  const yearCode = cleanVin[9];
-  const plantCode = cleanVin[10];
-  const serialNumber = cleanVin.slice(11, 17);
-  const fullBodyCode = getBodyCode(cleanVin);
-  const platformCode = getPlatformCode(cleanVin);
-  const engineFamilyFromVin = decodeEngineFamilyFromVinCode(engineCodeFromVin);
-
-  result.wmi.code = wmi;
-  result.body.code = shortBodyCode;
-  result.engine.code = engineCodeFromVin;
-  result.restraint_system.code = airbagCode;
-  result.model_info.raw_code = modelCode;
-  result.model_year.code = yearCode;
-  result.plant.code = plantCode;
-  result.serial_number = serialNumber;
-
-  result.vin_codes.wmi = wmi;
-  result.vin_codes.body_code = shortBodyCode;
-  result.vin_codes.engine_code = engineCodeFromVin;
-  result.vin_codes.restraint_code = airbagCode;
-  result.vin_codes.model_code = modelCode;
-  result.vin_codes.year_code = yearCode;
-  result.vin_codes.plant_code = plantCode;
-  result.vin_codes.serial_number = serialNumber;
-
-  result.wmi.manufacturer = resolveManufacturer(wmi);
-  result.wmi.country_hint = resolveCountryHint(wmi);
-
-  if (engineFamilyFromVin) {
-    result.engine.family = engineFamilyFromVin;
-  }
-
-  applyLegacyModelRules(result, db, {
-    wmi,
-    shortBodyCode,
-    engineCodeFromVin,
-    airbagCode,
-    modelCode,
-    yearCode,
-    plantCode,
-  });
-
+  applyLegacyModelRules(result, vinDatabase, structure);
   enrichWithExactVinDataset(result);
 
   if (!isExactDatasetMatch(result)) {
-    const patternKey = `${fullBodyCode}|${platformCode}`;
-    const rawPatternRule = vinPatternRules?.[patternKey] || null;
-    const patternRule = getApplicablePatternRule(result, rawPatternRule);
-    applyVinPatternRule(result, patternRule);
-  }
-
-  if (!isExactDatasetMatch(result)) {
+    applyPatternRuleEnrichment(result, structure);
     enrichWithEngineCodes(result);
     enrichWithGearboxCodes(result);
   }
 
   finalizeFromMasters(result);
   finalizeUiFields(result);
-
-  if (!result.model_info.name) {
-    result.supported = false;
-    result.reason = "VIN nije dovoljno poznat za tačan model.";
-    downgradeConfidence(result, "low");
-  }
+  finalizeDecoderConfidence(result);
 
   result.reason = result.valid
     ? result.reason
     : (result.validation_errors.join(", ") || "VIN nije podržan");
 
   return result;
+}
+
+function finalizeDecoderConfidence(result) {
+  if (!result.model_info.name) {
+    result.supported = false;
+    result.reason = "VIN nije dovoljno poznat za tačan model.";
+    downgradeConfidence(result, "low");
+  }
 }
 
 function applyLegacyModelRules(result, db, context) {
@@ -506,53 +515,68 @@ function applyLegacyModelRules(result, db, context) {
     downgradeConfidence(result, "medium");
   }
 
+  applyLegacyBodyData(result, db, modelRules, shortBodyCode);
+  applyLegacyEngineData(result, modelRules, engineCodeFromVin);
+  applyLegacyRestraintData(result, modelRules, airbagCode);
+  applyLegacyYearAndPlant(result, modelRules, yearCode, plantCode);
+
+  refreshVinSummary(result);
+}
+
+function applyLegacyBodyData(result, db, modelRules, shortBodyCode) {
   const bodyData = modelRules.body_map?.[shortBodyCode];
-  if (bodyData) {
-    result.body.style = bodyData.style ?? result.body.style ?? null;
-    result.body.normalized_style =
-      db.normalization?.body_styles?.[bodyData.style] ??
-      result.body.normalized_style ??
-      null;
-    result.body.steering = bodyData.steering ?? result.body.steering ?? null;
-    result.body.drivetrain =
-      bodyData.drivetrain
-        ? db.normalization?.drivetrain?.[bodyData.drivetrain] ?? bodyData.drivetrain
-        : result.body.drivetrain;
+  if (!bodyData) return;
 
-    if (bodyData.special_flags?.n1) {
-      result.special_flags.n1 = true;
-    }
+  result.body.style = bodyData.style ?? result.body.style ?? null;
+  result.body.normalized_style =
+    db.normalization?.body_styles?.[bodyData.style] ??
+    result.body.normalized_style ??
+    null;
+  result.body.steering = bodyData.steering ?? result.body.steering ?? null;
+  result.body.drivetrain =
+    bodyData.drivetrain
+      ? db.normalization?.drivetrain?.[bodyData.drivetrain] ?? bodyData.drivetrain
+      : result.body.drivetrain;
 
-    if (bodyData.special_flags?.motorsport) {
-      result.special_flags.motorsport = true;
-    }
+  if (bodyData.special_flags?.n1) {
+    result.special_flags.n1 = true;
   }
 
+  if (bodyData.special_flags?.motorsport) {
+    result.special_flags.motorsport = true;
+  }
+}
+
+function applyLegacyEngineData(result, modelRules, engineCodeFromVin) {
   const engineData = modelRules.engine_map?.[engineCodeFromVin];
-  if (engineData) {
-    result.engine.description = engineData.description ?? result.engine.description ?? null;
-    result.engine.fuel_type = engineData.fuel_type ?? result.engine.fuel_type ?? null;
-    result.engine.displacement_l = engineData.displacement_l ?? result.engine.displacement_l ?? null;
-    result.engine.power_kw = Array.isArray(engineData.power_kw)
-      ? engineData.power_kw
-      : result.engine.power_kw;
-    result.engine.power_kw_display = result.engine.power_kw.join("/") || result.engine.power_kw_display || null;
+  if (!engineData) return;
 
-    if (engineData.special_flags?.motorsport) {
-      result.special_flags.motorsport = true;
-    }
+  result.engine.description = engineData.description ?? result.engine.description ?? null;
+  result.engine.fuel_type = engineData.fuel_type ?? result.engine.fuel_type ?? null;
+  result.engine.displacement_l = engineData.displacement_l ?? result.engine.displacement_l ?? null;
+  result.engine.power_kw = Array.isArray(engineData.power_kw)
+    ? engineData.power_kw
+    : result.engine.power_kw;
+  result.engine.power_kw_display = result.engine.power_kw.join("/") || result.engine.power_kw_display || null;
 
-    if (Array.isArray(result.engine.power_kw) && result.engine.power_kw.length > 1) {
-      result.warnings.push("Engine code maps to multiple possible power outputs.");
-      downgradeConfidence(result, "medium");
-    }
+  if (engineData.special_flags?.motorsport) {
+    result.special_flags.motorsport = true;
   }
 
+  if (Array.isArray(result.engine.power_kw) && result.engine.power_kw.length > 1) {
+    result.warnings.push("Engine code maps to multiple possible power outputs.");
+    downgradeConfidence(result, "medium");
+  }
+}
+
+function applyLegacyRestraintData(result, modelRules, airbagCode) {
   const restraintData = modelRules.airbag_map?.[airbagCode];
   if (restraintData) {
     result.restraint_system.description = restraintData;
   }
+}
 
+function applyLegacyYearAndPlant(result, modelRules, yearCode, plantCode) {
   const yearFromRules = modelRules.year_map?.[yearCode];
   const yearFromVinPattern = decodeModelYearFromVinCode(yearCode);
 
@@ -570,8 +594,6 @@ function applyLegacyModelRules(result, db, context) {
   } else if (plantFromVinPattern) {
     result.plant.name = plantFromVinPattern;
   }
-
-  refreshVinSummary(result);
 }
 
 function applyBasicVinFallbacks(result, context) {
@@ -594,6 +616,14 @@ function enrichWithExactVinDataset(result) {
   result.enrichment.source = "vin_training_dataset_exact";
   result.confidence = "exact";
 
+  applyExactMatchBaseFields(result, exact);
+  applyExactMatchEngineSelection(result, exact);
+  applyExactMatchGearboxSelection(result, exact);
+
+  refreshVinSummary(result);
+}
+
+function applyExactMatchBaseFields(result, exact) {
   if (exact.model) {
     result.model_info.name = exact.model;
   }
@@ -639,61 +669,56 @@ function enrichWithExactVinDataset(result) {
     result.engine.power_kw = [exact.powerKw];
     result.engine.power_kw_display = String(exact.powerKw);
   }
+}
 
+function applyExactMatchEngineSelection(result, exact) {
   const masterEngine = exact.engineCode ? engineCodesMaster?.[exact.engineCode] : null;
-  if (masterEngine) {
-    result.enrichment.masterEngine = masterEngine;
-    result.enrichment.selectedEngine = {
-      code: exact.engineCode,
-      ...masterEngine,
-      kw: masterEngine.powerKw ?? null,
-      fuel_type: masterEngine.fuel ?? null,
-      displacement_l: masterEngine.displacementL ?? null,
-      oil_capacity_l: masterEngine.oilCapacityL ?? null,
-      oil_spec: masterEngine.oilSpec ?? null,
-      oil_viscosity: masterEngine.oilViscosity ?? null,
-      notes: masterEngine.description ?? null,
-    };
+  if (!masterEngine) return;
 
-    result.engine.family = masterEngine.family ?? result.engine.family ?? null;
-    result.engine.unit_code = masterEngine.engineUnit ?? result.engine.unit_code ?? null;
-    result.engine.description = masterEngine.description ?? result.engine.description ?? null;
-    result.engine.fuel_type = masterEngine.fuel ?? result.engine.fuel_type ?? null;
-    result.engine.displacement_l = masterEngine.displacementL ?? result.engine.displacement_l ?? null;
+  result.enrichment.masterEngine = masterEngine;
+  result.enrichment.selectedEngine = buildSelectedEngineFromMaster(exact.engineCode, masterEngine);
 
-    if (masterEngine.powerKw != null) {
-      result.engine.power_kw = [masterEngine.powerKw];
-      result.engine.power_kw_display = String(masterEngine.powerKw);
-    }
+  result.engine.family = masterEngine.family ?? result.engine.family ?? null;
+  result.engine.unit_code = masterEngine.engineUnit ?? result.engine.unit_code ?? null;
+  result.engine.description = masterEngine.description ?? result.engine.description ?? null;
+  result.engine.fuel_type = masterEngine.fuel ?? result.engine.fuel_type ?? null;
+  result.engine.displacement_l = masterEngine.displacementL ?? result.engine.displacement_l ?? null;
 
-    if (masterEngine.oilCapacityL != null) {
-      result.oilCapacity = `${masterEngine.oilCapacityL} L`;
-    }
-    if (masterEngine.oilSpec) {
-      result.oilSpec = masterEngine.oilSpec;
-    }
-    if (masterEngine.oilViscosity) {
-      result.oilSae = masterEngine.oilViscosity;
-    }
+  if (masterEngine.powerKw != null) {
+    result.engine.power_kw = [masterEngine.powerKw];
+    result.engine.power_kw_display = String(masterEngine.powerKw);
   }
 
+  applyOilDataValues(result, {
+    oil_capacity_l: masterEngine.oilCapacityL ?? null,
+    oil_spec: masterEngine.oilSpec ?? null,
+    oil_viscosity: masterEngine.oilViscosity ?? null,
+  });
+}
+
+function applyExactMatchGearboxSelection(result, exact) {
   const masterGearbox = exact.transmissionCode
     ? gearboxCodesMaster?.[exact.transmissionCode]
     : null;
 
-  if (masterGearbox) {
-    result.enrichment.masterGearbox = masterGearbox;
-    result.enrichment.selectedGearbox = {
-      code: exact.transmissionCode,
-      ...masterGearbox,
-    };
+  if (!masterGearbox) return;
 
-    if (masterGearbox.drivetrain) {
-      result.body.drivetrain = masterGearbox.drivetrain;
-    }
+  result.enrichment.masterGearbox = masterGearbox;
+  result.enrichment.selectedGearbox = {
+    code: exact.transmissionCode,
+    ...masterGearbox,
+  };
+
+  if (masterGearbox.drivetrain) {
+    result.body.drivetrain = masterGearbox.drivetrain;
   }
+}
 
-  refreshVinSummary(result);
+function applyPatternRuleEnrichment(result, structure) {
+  const patternKey = `${structure.fullBodyCode}|${structure.platformCode}`;
+  const rawPatternRule = vinPatternRules?.[patternKey] || null;
+  const patternRule = getApplicablePatternRule(result, rawPatternRule);
+  applyVinPatternRule(result, patternRule);
 }
 
 function applyVinPatternRule(result, rule) {
@@ -705,6 +730,17 @@ function applyVinPatternRule(result, rule) {
     result.enrichment.source = "vin_pattern_rule";
   }
 
+  applyPatternRuleModelFields(result, rule);
+  applyPatternRuleEngineFields(result, rule);
+  const patternGearboxOptions = applyPatternRuleGearboxFields(result, rule);
+  applyPatternRuleDerivedFields(result, rule);
+  applyPatternRuleSelections(result, rule, patternGearboxOptions);
+  updatePatternRuleConfidence(result, rule, patternGearboxOptions);
+
+  refreshVinSummary(result);
+}
+
+function applyPatternRuleModelFields(result, rule) {
   if ((!result.model_info.name || result.model_info.name === "Unknown") && rule.models?.length === 1) {
     result.model_info.name = rule.models[0];
   }
@@ -712,34 +748,46 @@ function applyVinPatternRule(result, rule) {
   if (!result.model_year.year && rule.modelYears?.length === 1) {
     result.model_year.year = rule.modelYears[0];
   }
+}
 
-  if (Array.isArray(rule.engineCodes) && rule.engineCodes.length > 0) {
-    result.enrichment.possibleEngineCodes = unique([
-      ...result.enrichment.possibleEngineCodes,
-      ...rule.engineCodes,
-    ]);
-    if (result.enrichment.engineSource === "not_enriched") {
-      result.enrichment.engineSource = "vin_pattern_rule";
-    }
+function applyPatternRuleEngineFields(result, rule) {
+  if (!Array.isArray(rule.engineCodes) || rule.engineCodes.length === 0) return;
+
+  result.enrichment.possibleEngineCodes = unique([
+    ...result.enrichment.possibleEngineCodes,
+    ...rule.engineCodes,
+  ]);
+
+  if (result.enrichment.engineSource === "not_enriched") {
+    result.enrichment.engineSource = "vin_pattern_rule";
   }
+}
 
+function applyPatternRuleGearboxFields(result, rule) {
   const patternGearboxOptions = getPatternRuleGearboxOptions(rule);
-  if (patternGearboxOptions.length > 0) {
-    result.enrichment.possibleGearboxCodes = unique([
-      ...result.enrichment.possibleGearboxCodes,
-      ...patternGearboxOptions,
-    ]);
-    if (result.enrichment.gearboxSource === "not_enriched") {
-      result.enrichment.gearboxSource = "vin_pattern_rule";
-    }
-
-    if (patternGearboxOptions.length > 1 || rule?.hasGearboxConflict) {
-      result.enrichment.patternRuleConflict = buildPatternRuleConflict(rule, "gearbox", patternGearboxOptions);
-      result.gearboxCode = null;
-      result.gearboxCodeSource = "pattern_rule_conflict";
-    }
+  if (patternGearboxOptions.length === 0) {
+    return patternGearboxOptions;
   }
 
+  result.enrichment.possibleGearboxCodes = unique([
+    ...result.enrichment.possibleGearboxCodes,
+    ...patternGearboxOptions,
+  ]);
+
+  if (result.enrichment.gearboxSource === "not_enriched") {
+    result.enrichment.gearboxSource = "vin_pattern_rule";
+  }
+
+  if (patternGearboxOptions.length > 1 || rule?.hasGearboxConflict) {
+    result.enrichment.patternRuleConflict = buildPatternRuleConflict(rule, "gearbox", patternGearboxOptions);
+    result.gearboxCode = null;
+    result.gearboxCodeSource = "pattern_rule_conflict";
+  }
+
+  return patternGearboxOptions;
+}
+
+function applyPatternRuleDerivedFields(result, rule) {
   if ((!result.body.drivetrain || result.body.drivetrain === "N/A") && shouldAutoSelectPatternRuleValue(rule, "drivetrains")) {
     result.body.drivetrain = rule.drivetrains[0];
   }
@@ -747,42 +795,20 @@ function applyVinPatternRule(result, rule) {
   if ((!result.engine.fuel_type || result.engine.fuel_type === "N/A") && shouldAutoSelectPatternRuleValue(rule, "fuels")) {
     result.engine.fuel_type = rule.fuels[0];
   }
+}
 
+function applyPatternRuleSelections(result, rule, patternGearboxOptions) {
   if (shouldAutoSelectPatternRuleValue(rule, "engineCodes") && !result.enrichment.selectedEngine) {
     const code = rule.engineCodes[0];
     const master = engineCodesMaster?.[code] || null;
     if (master) {
       result.enrichment.masterEngine = master;
-      result.enrichment.selectedEngine = {
-        code,
-        ...master,
-        kw: master.powerKw ?? null,
-        fuel_type: master.fuel ?? null,
-        displacement_l: master.displacementL ?? null,
-        oil_capacity_l: master.oilCapacityL ?? null,
-        oil_spec: master.oilSpec ?? null,
-        oil_viscosity: master.oilViscosity ?? null,
-        notes: master.description ?? null,
-      };
-
-      result.engine.description = master.description ?? result.engine.description ?? null;
-      result.engine.fuel_type = master.fuel ?? result.engine.fuel_type ?? null;
-      result.engine.displacement_l = master.displacementL ?? result.engine.displacement_l ?? null;
-      result.engine.family = master.family ?? result.engine.family ?? null;
-      result.engine.unit_code = master.engineUnit ?? result.engine.unit_code ?? null;
-
-      if (master.powerKw != null) {
-        result.engine.power_kw = [master.powerKw];
-        result.engine.power_kw_display = String(master.powerKw);
-      }
+      result.enrichment.selectedEngine = buildSelectedEngineFromMaster(code, master);
+      applySelectedEngineDetails(result, result.enrichment.selectedEngine);
     }
   }
 
-  const canAutoSelectPatternGearbox =
-    !result.enrichment.patternRuleConflict &&
-    patternGearboxOptions.length === 1 &&
-    (hasStrongPatternRuleSupport(rule, "gearboxCodes") || hasSafeYearScopedPatternClosure(rule, "gearboxCodes"));
-
+  const canAutoSelectPatternGearbox = canAutoSelectPatternGearboxValue(result, rule, patternGearboxOptions);
   if (canAutoSelectPatternGearbox && !result.enrichment.selectedGearbox) {
     const code = patternGearboxOptions[0];
     const master = gearboxCodesMaster?.[code] || null;
@@ -795,6 +821,10 @@ function applyVinPatternRule(result, rule) {
       }
     }
   }
+}
+
+function updatePatternRuleConfidence(result, rule, patternGearboxOptions) {
+  const canAutoSelectPatternGearbox = canAutoSelectPatternGearboxValue(result, rule, patternGearboxOptions);
 
   if (shouldAutoSelectPatternRuleValue(rule, "engineCodes") && canAutoSelectPatternGearbox) {
     if (result.confidence !== "exact") {
@@ -803,8 +833,17 @@ function applyVinPatternRule(result, rule) {
   } else {
     downgradeConfidence(result, "medium");
   }
+}
 
-  refreshVinSummary(result);
+function canAutoSelectPatternGearboxValue(result, rule, patternGearboxOptions) {
+  return (
+    !result.enrichment.patternRuleConflict &&
+    patternGearboxOptions.length === 1 &&
+    (
+      hasStrongPatternRuleSupport(rule, "gearboxCodes") ||
+      hasSafeYearScopedPatternClosure(rule, "gearboxCodes")
+    )
+  );
 }
 
 function isExactDatasetMatch(result) {
@@ -835,32 +874,52 @@ function enrichWithEngineCodes(result) {
     ...result.enrichment.possibleEngineCodes,
   ]);
 
+  const candidates = buildCompatibleEngineCandidates(result, modelKey, seedCodes);
+  result.enrichment.engineCandidates = candidates;
+
+  const combinedCodes = unique([
+    ...seedCodes,
+    ...candidates.map((item) => item.code),
+  ]);
+
+  result.enrichment.possibleEngineCodes = combinedCodes;
+  updateEngineEnrichmentMetadata(result, exactEngineCodes, seedCodes, combinedCodes);
+
+  if (combinedCodes.length === 0) {
+    return;
+  }
+
+  const preferredCode = getPreferredEngineCode(result, exactEngineCodes, seedCodes);
+  if (preferredCode) {
+    const preferredCandidate =
+      candidates.find((item) => item.code === preferredCode) ||
+      buildMasterEngineCandidate(preferredCode);
+
+    if (preferredCandidate) {
+      applySelectedEngineCandidate(result, preferredCandidate);
+    }
+    return;
+  }
+
+  const bestCandidate = candidates[0] || null;
+  if (bestCandidate && shouldAutoSelectEngineCandidate(bestCandidate, candidates)) {
+    applySelectedEngineCandidate(result, bestCandidate);
+    result.enrichment.possibleEngineCodes = [bestCandidate.code];
+    return;
+  }
+
+  applyCommonOilData(result, candidates);
+}
+
+function buildCompatibleEngineCandidates(result, modelKey, seedCodes) {
   const engines = engineCodesDb?.engines || {};
   const modelYear = result.model_year?.year || null;
   const displacement = result.engine?.displacement_l ?? null;
   const fuelType = result.engine?.fuel_type ?? null;
   const powers = Array.isArray(result.engine?.power_kw) ? result.engine.power_kw : [];
 
-  const candidates = Object.entries(engines)
-    .map(([code, raw]) => {
-      const item = {
-        code,
-        ...raw,
-        kw: raw?.powerKw ?? raw?.kw ?? null,
-        fuel_type: raw?.fuel ?? raw?.fuel_type ?? null,
-        displacement_l: raw?.displacementL ?? raw?.displacement_l ?? null,
-        oil_capacity_l: raw?.oilCapacityL ?? raw?.oil_capacity_l ?? null,
-        oil_spec: raw?.oilSpec ?? raw?.oil_spec ?? null,
-        oil_viscosity: raw?.oilViscosity ?? raw?.oil_viscosity ?? null,
-        notes: raw?.description ?? raw?.notes ?? null,
-        family: raw?.family ?? null,
-        engineUnit: raw?.engineUnit ?? raw?.engine_unit ?? null,
-        applications: Array.isArray(raw?.applications) ? raw.applications : [],
-        models: Array.isArray(raw?.models) ? raw.models : [],
-      };
-
-      return item;
-    })
+  return Object.entries(engines)
+    .map(([code, raw]) => buildEngineCandidateFromRaw(code, raw))
     .filter((item) =>
       isEngineCandidateCompatible(
         item,
@@ -882,16 +941,27 @@ function enrichWithEngineCodes(result) {
       };
     })
     .sort(compareEngineCandidates);
+}
 
-  result.enrichment.engineCandidates = candidates;
+function buildEngineCandidateFromRaw(code, raw) {
+  return {
+    code,
+    ...raw,
+    kw: raw?.powerKw ?? raw?.kw ?? null,
+    fuel_type: raw?.fuel ?? raw?.fuel_type ?? null,
+    displacement_l: raw?.displacementL ?? raw?.displacement_l ?? null,
+    oil_capacity_l: raw?.oilCapacityL ?? raw?.oil_capacity_l ?? null,
+    oil_spec: raw?.oilSpec ?? raw?.oil_spec ?? null,
+    oil_viscosity: raw?.oilViscosity ?? raw?.oil_viscosity ?? null,
+    notes: raw?.description ?? raw?.notes ?? null,
+    family: raw?.family ?? null,
+    engineUnit: raw?.engineUnit ?? raw?.engine_unit ?? null,
+    applications: Array.isArray(raw?.applications) ? raw.applications : [],
+    models: Array.isArray(raw?.models) ? raw.models : [],
+  };
+}
 
-  const combinedCodes = unique([
-    ...seedCodes,
-    ...candidates.map((item) => item.code),
-  ]);
-
-  result.enrichment.possibleEngineCodes = combinedCodes;
-
+function updateEngineEnrichmentMetadata(result, exactEngineCodes, seedCodes, combinedCodes) {
   if (combinedCodes.length > 0 && result.enrichment.engineSource === "not_enriched") {
     result.enrichment.engineSource =
       exactEngineCodes.length > 0
@@ -905,43 +975,18 @@ function enrichWithEngineCodes(result) {
     result.warnings.push("Multiple possible ETKA engine codes matched the VIN profile.");
     downgradeConfidence(result, "medium");
   }
+}
 
-  if (combinedCodes.length === 0) {
-    return;
-  }
-
-  const preferredCode =
+function getPreferredEngineCode(result, exactEngineCodes, seedCodes) {
+  return (
     exactEngineCodes[0] ||
-    (seedCodes.length === 1 && hasStrongPatternRuleSupport(result.enrichment?.patternRule, "engineCodes") ? seedCodes[0] : null);
+    (seedCodes.length === 1 && hasStrongPatternRuleSupport(result.enrichment?.patternRule, "engineCodes") ? seedCodes[0] : null)
+  );
+}
 
-  if (preferredCode) {
-    const preferredCandidate =
-      candidates.find((item) => item.code === preferredCode) ||
-      buildMasterEngineCandidate(preferredCode);
-
-    if (preferredCandidate) {
-      applySelectedEngineCandidate(result, preferredCandidate);
-    }
-    return;
-  }
-
-  const bestCandidate = candidates[0] || null;
-  if (bestCandidate && shouldAutoSelectEngineCandidate(bestCandidate, candidates)) {
-    applySelectedEngineCandidate(result, bestCandidate);
-    result.enrichment.possibleEngineCodes = [bestCandidate.code];
-    return;
-  }
-
+function applyCommonOilData(result, candidates) {
   const commonOil = getCommonOilData(candidates);
-  if (commonOil.capacity_l !== null && result.oilCapacity === "N/A") {
-    result.oilCapacity = `${commonOil.capacity_l} L`;
-  }
-  if (commonOil.spec && result.oilSpec === "N/A") {
-    result.oilSpec = commonOil.spec;
-  }
-  if (commonOil.viscosity && result.oilSae === "N/A") {
-    result.oilSae = commonOil.viscosity;
-  }
+  applyOilDataValues(result, commonOil);
 }
 
 function enrichWithGearboxCodes(result) {
@@ -955,64 +1000,84 @@ function enrichWithGearboxCodes(result) {
     ...result.enrichment.possibleGearboxCodes,
   ]);
 
-  const seedMasters = seedCodes
+  const seedMasters = getSeedGearboxMasters(seedCodes);
+  if (tryApplySeedGearboxSelection(result, exactTransmissionCode, seedMasters)) {
+    return;
+  }
+
+  if (seedCodes.length > 1) {
+    applySeedGearboxConflicts(result, exactTransmissionCode, seedCodes);
+    return;
+  }
+
+  enrichGearboxFromModelCandidates(result);
+}
+
+function getSeedGearboxMasters(seedCodes) {
+  return seedCodes
     .map((code) => (code ? { code, ...(gearboxCodesMaster?.[code] || {}) } : null))
     .filter(Boolean);
+}
 
+function tryApplySeedGearboxSelection(result, exactTransmissionCode, seedMasters) {
   if (
-    seedMasters.length === 1 &&
-    (
+    seedMasters.length !== 1 ||
+    !(
       exactTransmissionCode ||
       hasStrongPatternRuleSupport(result.enrichment?.patternRule, "gearboxCodes") ||
       hasSafeYearScopedPatternClosure(result.enrichment?.patternRule, "gearboxCodes")
     )
   ) {
-    result.enrichment.selectedGearbox = seedMasters[0];
-    result.enrichment.masterGearbox =
-      gearboxCodesMaster?.[seedMasters[0].code] || result.enrichment.masterGearbox;
-
-    if (seedMasters[0].drivetrain && !result.body.drivetrain) {
-      result.body.drivetrain = seedMasters[0].drivetrain;
-    }
-
-    result.gearboxCode = seedMasters[0].code;
-    result.gearboxCodeSource =
-      exactTransmissionCode ? "exact_vin_training_dataset" : "vin_pattern_rule";
-    result.menjacSource =
-      exactTransmissionCode ? "vin_training_dataset_exact" : "vin_pattern_rule";
-
-    result.enrichment.possibleGearboxCodes = [seedMasters[0].code];
-    result.enrichment.gearboxTechCandidates = unique(
-      [seedMasters[0].tech_info].filter(Boolean)
-    );
-
-    return;
+    return false;
   }
 
-  if (seedCodes.length > 1) {
-    result.enrichment.possibleGearboxCodes = unique(seedCodes);
+  const selectedGearbox = seedMasters[0];
+  result.enrichment.selectedGearbox = selectedGearbox;
+  result.enrichment.masterGearbox =
+    gearboxCodesMaster?.[selectedGearbox.code] || result.enrichment.masterGearbox;
 
-    if (result.enrichment?.patternRuleConflict?.field === "gearbox") {
-      result.gearboxCode = null;
-      result.gearboxCodeSource = "pattern_rule_conflict";
-    }
-
-    const seedTechCandidates = seedCodes
-      .map((code) => gearboxCodesDb?.models?.[toEnrichmentModelKey(result.model_info.name)]?.find((item) => item.code === code)?.tech_info)
-      .filter(Boolean);
-
-    result.enrichment.gearboxTechCandidates = unique(seedTechCandidates);
-
-    if (result.enrichment.gearboxSource === "not_enriched") {
-      result.enrichment.gearboxSource =
-        exactTransmissionCode
-          ? "vin_training_dataset_exact"
-          : "vin_pattern_rule";
-    }
-
-    return;
+  if (selectedGearbox.drivetrain && !result.body.drivetrain) {
+    result.body.drivetrain = selectedGearbox.drivetrain;
   }
 
+  result.gearboxCode = selectedGearbox.code;
+  result.gearboxCodeSource =
+    exactTransmissionCode ? "exact_vin_training_dataset" : "vin_pattern_rule";
+  result.menjacSource =
+    exactTransmissionCode ? "vin_training_dataset_exact" : "vin_pattern_rule";
+
+  result.enrichment.possibleGearboxCodes = [selectedGearbox.code];
+  result.enrichment.gearboxTechCandidates = unique(
+    [selectedGearbox.tech_info].filter(Boolean)
+  );
+
+  return true;
+}
+
+function applySeedGearboxConflicts(result, exactTransmissionCode, seedCodes) {
+  result.enrichment.possibleGearboxCodes = unique(seedCodes);
+
+  if (result.enrichment?.patternRuleConflict?.field === "gearbox") {
+    result.gearboxCode = null;
+    result.gearboxCodeSource = "pattern_rule_conflict";
+  }
+
+  const modelKey = toEnrichmentModelKey(result.model_info.name);
+  const seedTechCandidates = seedCodes
+    .map((code) => gearboxCodesDb?.models?.[modelKey]?.find((item) => item.code === code)?.tech_info)
+    .filter(Boolean);
+
+  result.enrichment.gearboxTechCandidates = unique(seedTechCandidates);
+
+  if (result.enrichment.gearboxSource === "not_enriched") {
+    result.enrichment.gearboxSource =
+      exactTransmissionCode
+        ? "vin_training_dataset_exact"
+        : "vin_pattern_rule";
+  }
+}
+
+function enrichGearboxFromModelCandidates(result) {
   const modelKey = toEnrichmentModelKey(result.model_info.name);
   if (!modelKey) {
     return;
@@ -1023,16 +1088,7 @@ function enrichWithGearboxCodes(result) {
     return;
   }
 
-  const modelYear = result.model_year?.year || null;
-  const inferredGearbox = inferGearbox(result);
-  const allowedTech = mapInferredGearboxToTechCandidates(inferredGearbox);
-
-  const filtered = candidates.filter((item) => {
-    if (modelYear && !isYearCompatible(modelYear, item.mounting)) return false;
-    if (allowedTech.length > 0 && !allowedTech.includes(item.tech_info)) return false;
-    return true;
-  });
-
+  const filtered = filterGearboxCandidates(result, candidates);
   const combinedCodes = unique(filtered.map((item) => item.code));
 
   result.enrichment.possibleGearboxCodes = combinedCodes;
@@ -1063,30 +1119,24 @@ function enrichWithGearboxCodes(result) {
   }
 }
 
+function filterGearboxCandidates(result, candidates) {
+  const modelYear = result.model_year?.year || null;
+  const inferredGearbox = inferGearbox(result);
+  const allowedTech = mapInferredGearboxToTechCandidates(inferredGearbox);
+
+  return candidates.filter((item) => {
+    if (modelYear && !isYearCompatible(modelYear, item.mounting)) return false;
+    if (allowedTech.length > 0 && !allowedTech.includes(item.tech_info)) return false;
+    return true;
+  });
+}
+
 function finalizeFromMasters(result) {
   const selectedEngine = result.enrichment?.selectedEngine;
   const selectedGearbox = result.enrichment?.selectedGearbox;
 
   if (selectedEngine) {
-    if (!result.engine.description && selectedEngine.notes) {
-      result.engine.description = selectedEngine.notes;
-    }
-    if (!result.engine.fuel_type && selectedEngine.fuel_type) {
-      result.engine.fuel_type = selectedEngine.fuel_type;
-    }
-    if (result.engine.displacement_l == null && selectedEngine.displacement_l != null) {
-      result.engine.displacement_l = selectedEngine.displacement_l;
-    }
-    if ((!result.engine.power_kw || result.engine.power_kw.length === 0) && selectedEngine.kw != null) {
-      result.engine.power_kw = [selectedEngine.kw];
-      result.engine.power_kw_display = String(selectedEngine.kw);
-    }
-    if (!result.engine.family && selectedEngine.family) {
-      result.engine.family = selectedEngine.family;
-    }
-    if (!result.engine.unit_code && selectedEngine.engineUnit) {
-      result.engine.unit_code = selectedEngine.engineUnit;
-    }
+    applySelectedEngineDetails(result, selectedEngine);
   }
 
   if (selectedGearbox?.drivetrain && !result.body.drivetrain) {
@@ -1106,27 +1156,45 @@ function finalizeFromMasters(result) {
 
 function finalizeUiFields(result) {
   result.marka = "Skoda";
-
-  result.model = [result.model_info.name, result.model_info.generation]
-    .filter(Boolean)
-    .join(" ") || result.model_info.name || "N/A";
-
-  if (result.enrichment.possibleEngineCodes.length === 1) {
-    result.motorKod = result.enrichment.possibleEngineCodes[0];
-  } else if (result.enrichment.possibleEngineCodes.length > 1) {
-    result.motorKod = result.enrichment.possibleEngineCodes.join(", ");
-  } else if (result.enrichment.exactVinMatch?.engineCode) {
-    result.motorKod = result.enrichment.exactVinMatch.engineCode;
-  } else {
-    result.motorKod = result.engine.code || "N/A";
-  }
-
+  result.model = buildUiModelLabel(result);
+  result.motorKod = buildUiMotorCode(result);
   result.motor = buildUiEngineLabel(result);
   result.menjac = inferGearbox(result);
   result.modelYear = result.model_year.year || null;
   result.drivetrain = result.body.drivetrain || "N/A";
   result.fuelType = normalizeFuelLabel(result.engine.fuel_type);
 
+  finalizeUiGearboxFields(result);
+  applyOilDataToUi(result);
+
+  result.candidates = buildUiCandidates(result);
+  result.possible_matches = [...result.candidates];
+  refreshVinSummary(result);
+}
+
+function buildUiModelLabel(result) {
+  return [result.model_info.name, result.model_info.generation]
+    .filter(Boolean)
+    .join(" ") || result.model_info.name || "N/A";
+}
+
+function buildUiMotorCode(result) {
+  if (result.enrichment.possibleEngineCodes.length === 1) {
+    return result.enrichment.possibleEngineCodes[0];
+  }
+
+  if (result.enrichment.possibleEngineCodes.length > 1) {
+    return result.enrichment.possibleEngineCodes.join(", ");
+  }
+
+  if (result.enrichment.exactVinMatch?.engineCode) {
+    return result.enrichment.exactVinMatch.engineCode;
+  }
+
+  return result.engine.code || "N/A";
+}
+
+function finalizeUiGearboxFields(result) {
   if (isExactDatasetMatch(result)) {
     result.gearboxCode =
       result.enrichment?.exactVinMatch?.transmissionCode ||
@@ -1135,15 +1203,24 @@ function finalizeUiFields(result) {
     result.gearboxCodeSource = "exact_vin_training_dataset";
     result.menjacSource = "vin_training_dataset_exact";
     result.confidence = "exact";
-  } else if (result.enrichment?.selectedGearbox?.code) {
+    return;
+  }
+
+  if (result.enrichment?.selectedGearbox?.code) {
     result.gearboxCode = result.enrichment.selectedGearbox.code;
     if (result.gearboxCodeSource === "not_available_from_vin") {
       result.gearboxCodeSource = result.enrichment.gearboxSource;
     }
-  } else if (result.enrichment.possibleGearboxCodes.length === 1) {
+    return;
+  }
+
+  if (result.enrichment.possibleGearboxCodes.length === 1) {
     result.gearboxCode = result.enrichment.possibleGearboxCodes[0];
     result.gearboxCodeSource = result.enrichment.gearboxSource;
-  } else if (result.enrichment.possibleGearboxCodes.length > 1) {
+    return;
+  }
+
+  if (result.enrichment.possibleGearboxCodes.length > 1) {
     if (result.enrichment?.patternRuleConflict?.field === "gearbox") {
       result.gearboxCode = null;
       result.gearboxCodeSource = "pattern_rule_conflict";
@@ -1152,12 +1229,6 @@ function finalizeUiFields(result) {
       result.gearboxCodeSource = result.enrichment.gearboxSource;
     }
   }
-
-  applyOilDataToUi(result);
-
-  result.candidates = buildUiCandidates(result);
-  result.possible_matches = [...result.candidates];
-  refreshVinSummary(result);
 }
 
 function buildUiCandidates(result) {
@@ -1210,6 +1281,20 @@ function buildMasterEngineCandidate(code) {
   };
 }
 
+function buildSelectedEngineFromMaster(code, master) {
+  return {
+    code,
+    ...master,
+    kw: master.powerKw ?? null,
+    fuel_type: master.fuel ?? null,
+    displacement_l: master.displacementL ?? null,
+    oil_capacity_l: master.oilCapacityL ?? null,
+    oil_spec: master.oilSpec ?? null,
+    oil_viscosity: master.oilViscosity ?? null,
+    notes: master.description ?? null,
+  };
+}
+
 function applySelectedEngineCandidate(result, candidate) {
   if (!candidate) return;
 
@@ -1217,6 +1302,11 @@ function applySelectedEngineCandidate(result, candidate) {
   result.enrichment.masterEngine = engineCodesMaster?.[candidate.code] || result.enrichment.masterEngine;
   result.enrichment.possibleEngineCodes = [candidate.code];
 
+  applySelectedEngineDetails(result, candidate);
+  applyOilDataValues(result, candidate);
+}
+
+function applySelectedEngineDetails(result, candidate) {
   if (!result.engine.description && candidate.notes) {
     result.engine.description = candidate.notes;
   }
@@ -1240,16 +1330,6 @@ function applySelectedEngineCandidate(result, candidate) {
 
   if (!result.engine.unit_code && candidate.engineUnit) {
     result.engine.unit_code = candidate.engineUnit;
-  }
-
-  if (candidate.oil_capacity_l != null && result.oilCapacity === "N/A") {
-    result.oilCapacity = `${candidate.oil_capacity_l} L`;
-  }
-  if (candidate.oil_spec && result.oilSpec === "N/A") {
-    result.oilSpec = candidate.oil_spec;
-  }
-  if (candidate.oil_viscosity && result.oilSae === "N/A") {
-    result.oilSae = candidate.oil_viscosity;
   }
 }
 
@@ -1383,28 +1463,32 @@ function applyOilDataToUi(result) {
   const selected = result.enrichment?.selectedEngine;
 
   if (selected) {
-    if (selected.oil_capacity_l != null && result.oilCapacity === "N/A") {
-      result.oilCapacity = `${selected.oil_capacity_l} L`;
-    }
-    if (selected.oil_spec && result.oilSpec === "N/A") {
-      result.oilSpec = selected.oil_spec;
-    }
-    if (selected.oil_viscosity && result.oilSae === "N/A") {
-      result.oilSae = selected.oil_viscosity;
-    }
+    applyOilDataValues(result, selected);
     return;
   }
 
   const commonOil = getCommonOilData(result.enrichment?.engineCandidates || []);
+  applyOilDataValues(result, commonOil);
+}
 
-  if (commonOil.capacity_l != null && result.oilCapacity === "N/A") {
-    result.oilCapacity = `${commonOil.capacity_l} L`;
+function applyOilDataValues(result, oilSource) {
+  if (oilSource?.oil_capacity_l != null && result.oilCapacity === "N/A") {
+    result.oilCapacity = `${oilSource.oil_capacity_l} L`;
   }
-  if (commonOil.spec && result.oilSpec === "N/A") {
-    result.oilSpec = commonOil.spec;
+  if (oilSource?.capacity_l != null && result.oilCapacity === "N/A") {
+    result.oilCapacity = `${oilSource.capacity_l} L`;
   }
-  if (commonOil.viscosity && result.oilSae === "N/A") {
-    result.oilSae = commonOil.viscosity;
+  if (oilSource?.oil_spec && result.oilSpec === "N/A") {
+    result.oilSpec = oilSource.oil_spec;
+  }
+  if (oilSource?.spec && result.oilSpec === "N/A") {
+    result.oilSpec = oilSource.spec;
+  }
+  if (oilSource?.oil_viscosity && result.oilSae === "N/A") {
+    result.oilSae = oilSource.oil_viscosity;
+  }
+  if (oilSource?.viscosity && result.oilSae === "N/A") {
+    result.oilSae = oilSource.viscosity;
   }
 }
 
